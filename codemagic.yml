@@ -1,0 +1,41 @@
+workflows:
+  ios_and_android:
+    name: Build APK and iOS app for MAUI
+    max_build_duration: 60
+    environment:
+      vars:
+        DOTNET_VERSION: "9.0"
+    platform:
+      ios:
+        xcode_version: "15.4"
+        build_mode: release
+
+      android:
+        android_sdk:
+          version: "30"
+        gradle:
+          version: "7.0"
+    
+    scripts:
+      - name: Install .NET SDK
+        script: |
+          curl -sSL https://dotnet.microsoft.com/download/dotnet | bash
+          export PATH="$PATH:$HOME/dotnet"
+
+      - name: Install Dependencies
+        script: |
+          dotnet restore
+
+      - name: Build Android APK
+        script: |
+          dotnet build -f:net9.0-android -c Release
+          dotnet publish -f:net9.0-android -c Release -o ./output/android
+
+      - name: Build iOS App
+        script: |
+          dotnet build -f:net9.0-ios -c Release
+          dotnet publish -f:net9.0-ios -c Release -o ./output/ios
+
+    artifacts:
+      - output/android/*.apk
+      - output/ios/**/*.app
