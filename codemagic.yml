@@ -1,41 +1,156 @@
 workflows:
-  ios_and_android:
-    name: Build APK and iOS app for MAUI
-    max_build_duration: 60
+  maui-ios:
+    name: Dotnet MAUI iOS
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic-api
     environment:
+
+      ios_signing:
+
+        distribution_type: app_store
+
+        bundle_identifier: com.companyname.testapp
+
       vars:
-        DOTNET_VERSION: "9.0"
-    platform:
-      ios:
-        xcode_version: "15.4"
-        build_mode: release
 
-      android:
-        android_sdk:
-          version: "30"
-        gradle:
-          version: "7.0"
-    
+        DOTNET_PATH: $CM_BUILD_DIR/dotnet
+
+        DOTNET: $CM_BUILD_DIR/dotnet/dotnet
+
+        APP_STORE_APPLE_ID: 6444530615
+
+        BUNDLE_ID: "com.companyname.testapp"
+
     scripts:
-      - name: Install .NET SDK
-        script: |
-          curl -sSL https://dotnet.microsoft.com/download/dotnet | bash
-          export PATH="$PATH:$HOME/dotnet"
 
-      - name: Install Dependencies
-        script: |
-          dotnet restore
+      - name: Install dotnet sdk
 
-      - name: Build Android APK
-        script: |
-          dotnet build -f:net9.0-android -c Release
-          dotnet publish -f:net9.0-android -c Release -o ./output/android
+        script: | 
 
-      - name: Build iOS App
-        script: |
-          dotnet build -f:net9.0-ios -c Release
-          dotnet publish -f:net9.0-ios -c Release -o ./output/ios
+          wget https://dot.net/v1/dotnet-install.sh
+
+          chmod +x dotnet-install.sh
+
+          ./dotnet-install.sh --install-dir $DOTNET_PATH --version 9.0.0
+
+      - name: Install MAUI
+
+        script: | 
+
+          $DOTNET nuget locals all --clear 
+
+          $DOTNET workload install ios maui \
+
+            --source https://aka.ms/dotnet9/nuget/index.json \
+
+            --source https://api.nuget.org/v3/index.json      
+
+      - name: Set Info.plist values
+
+        script: | 
+
+          # Automatically fill out the encryption compliance setting
+
+          PLIST=$CM_BUILD_DIR/src/WeatherTwentyOne/Platforms/iOS/Info.plist
+
+          PLIST_BUDDY=/usr/libexec/PlistBuddy
+
+          $PLIST_BUDDY -c "Add :ITSAppUsesNonExemptEncryption bool false" $PLIST
+
+      - name: Set build version and build the app
+
+        script: | 
+
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID")
+
+          if [ -z $LATEST_BUILD_NUMBER ]; then
+
+            UPDATED_BUILD_NUMBER=$BUILD_NUMBER
+
+          else
+
+            UPDATED_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
+
+          fi
+
+          cd src
+
+          # Removed the signing parameters as you don't have keys
+          $DOTNET publish TestApp/TestApp/TestApp.csproj -f net9.0-ios \
+            -c Release \
+            -p:BuildIpa=True \
+            -p:ApplicationDisplayVersion="1.0.0" \
+            -p:ApplicationVersion=$UPDATED_BUILD_NUMBER \
+            -p:RuntimeIdentifier=ios-arm64 \
+            -o ../artifacts
 
     artifacts:
-      - output/android/*.apk
-      - output/ios/**/*.app
+        - ./artifacts/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+
+  maui-android:
+    name: Dotnet MAUI Android
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+
+      android_signing:
+        - codemagic-key
+
+      groups:
+        - google_play
+
+      vars:
+
+        DOTNET_PATH: $CM_BUILD_DIR/dotnet
+        DOTNET: $CM_BUILD_DIR/dotnet/dotnet
+        PACKAGE_NAME: "com.companyname.testapp"
+
+    scripts:
+
+      - name: Install dotnet sdk
+
+        script: |
+          wget https://dot.net/v1/dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --install-dir $DOTNET_PATH --version 9.0.0
+
+      - name: Install MAUI
+
+        script: |
+          $DOTNET nuget locals all --clear
+          $DOTNET workload install android maui \
+            --source https://aka.ms/dotnet9/nuget/index.json \
+            --source https://api.nuget.org/v3/index.json      
+
+      - name: Build
+
+        script: | 
+
+          LATEST_BUILD_NUMBER=$(google-play get-latest-build-number --package-name "$PACKAGE_NAME")
+
+          if [ -z $LATEST_BUILD_NUMBER ]; then
+
+            UPDATED_BUILD_NUMBER=$BUILD_NUMBER
+
+          else
+
+            UPDATED_BUILD_NUMBER=$(($LATEST_BUILD_NUMBER + 1))
+
+          fi
+
+          cd src
+
+          # Removed the signing parameters as you don't have keys
+          $DOTNET publish TestApp/TestApp/TestApp.csproj -f net9.0-android \
+            -c Release \
+            -p:AndroidKeyStore=False \
+            -p:ApplicationVersion=$UPDATED_BUILD_NUMBER \
+            -p:ApplicationDisplayVersion="1.0.0" \
+            -o ../artifacts
+    artifacts:
+        - /Users/builder/clone/artifacts/*Signed.aab
